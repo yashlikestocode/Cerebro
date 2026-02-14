@@ -1,4 +1,4 @@
-"use client";
+"use client"
 
 import React from "react"
 
@@ -39,6 +39,9 @@ export function Dashboard() {
   const [typingText, setTypingText] = useState("");
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  const [messages, setMessages] = useState<
+    { role: "user" | "assistant"; content: string }[]
+  >([]);
 
   useEffect(() => {
     setIsVisible(true);
@@ -109,36 +112,67 @@ const handleSubmit = async (e: React.FormEvent) => {
   if (!userInput.trim()) return;
 
   setIsProcessing(true);
-  setAgentMessage("Analyzing your request and creating a personalized plan...");
+
+  const updatedMessages: { role: "user" | "assistant"; content: string }[] = [
+    ...messages,
+    { role: "user", content: userInput },
+  ];
+
+  setMessages(updatedMessages);
 
   try {
     const {
       data: { session },
     } = await supabase.auth.getSession();
 
-    if (!session) throw new Error("User not authenticated");
+    if (!session) {
+      setAgentMessage("Please log in first.");
+      setIsProcessing(false);
+      return;
+    }
 
     const res = await axiosInstance.post(
       "/plans",
-      {
-        prompt: userInput,
-      },
+      { messages: updatedMessages },
       {
         headers: {
           Authorization: `Bearer ${session.access_token}`,
         },
-      }
+      },
     );
 
-    setPlan(res.data.plan);
-    setAgentMessage(
-      `I've crafted a personalized learning journey for "${userInput}".`
-    );
+    const data = res.data;
+
+    if (data.type === "question") {
+      setAgentMessage(data.question);
+
+      setMessages([
+        ...updatedMessages,
+        { role: "assistant", content: data.question },
+      ]);
+    }
+
+    if (data.type === "plan") {
+      setAgentMessage(data.summary);
+
+      const formattedPlan: PlanStep[] = data.plan.map(
+        (step: any, index: number) => ({
+          id: step.stepId || (index + 1).toString(),
+          title: step.title,
+          description: step.description,
+          status: "pending",
+          estimatedTime: step.estimatedTime || "Flexible",
+        }),
+      );
+
+      setPlan(formattedPlan);
+    }
   } catch (err) {
     console.error(err);
     setAgentMessage("Something went wrong. Please try again.");
   } finally {
     setIsProcessing(false);
+    setUserInput("");
   }
 };
 
